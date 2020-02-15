@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+option csharp_namespace = "grpc_test";
+
+package bouncy;
+
+
+service Bouncer {
+
+  rpc BounceIt (BounceRequest) returns (BounceReply);
+
+}
+
+
+message BounceRequest {
+  double chanceOfBounce = 1;
+  string targetA = 2;
+  string targetB = 3;
+  bool doTargetA = 4;
+}
+
+
+message BounceReply {
+  string msg = 1;
+}
