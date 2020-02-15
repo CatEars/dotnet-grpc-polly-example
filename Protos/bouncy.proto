@@ -17,6 +17,7 @@ message BounceRequest {
   string targetA = 2;
   string targetB = 3;
   bool doTargetA = 4;
+  string tabLevel = 5;
 }
 
 

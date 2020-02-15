@@ -22,33 +22,35 @@ namespace grpc_test
         public BouncyService(ILogger<BouncyService> logger)
         {
             _logger = logger;
+
             var loggerFactory = LoggerFactory.Create(builder => {
                     builder
                     .AddConsole();
                 });
+
             var serviceName = Environment.GetEnvironmentVariable("JAEGER_SERVICE_NAME");
             var jaegerEndpoint = Environment.GetEnvironmentVariable("JAEGER_ENDPOINT");
             var sender = new HttpSender(jaegerEndpoint);
+
             var reporter = new RemoteReporter.Builder()
                 .WithLoggerFactory(loggerFactory)
                 .WithMaxQueueSize(1000)
                 .WithFlushInterval(TimeSpan.FromSeconds(10))
                 .WithSender(sender)
                 .Build();
+
             _tracer = new Tracer.Builder(serviceName)
                 .WithSampler(new ConstSampler(true))
                 .WithLoggerFactory(loggerFactory)
                 .WithReporter(reporter)
                 .Build();
-
         }
 
-        public Metadata CreateInjectPackageFromSpan(ISpan span)
+        private static Metadata CreateInjectMetadataFromSpan(ITracer tracer, ISpan span)
         {
             var dict = new Dictionary<string, string>();
-            _tracer.Inject(
-                           span.Context, BuiltinFormats.HttpHeaders,
-                           new TextMapInjectAdapter(dict));
+            var injectAdapter = new TextMapInjectAdapter(dict);
+            tracer.Inject(span.Context, BuiltinFormats.HttpHeaders, injectAdapter);
             var meta = new Metadata();
             foreach (var entry in dict)
             {
@@ -57,7 +59,7 @@ namespace grpc_test
             return meta;
         }
 
-        public IDictionary<string, string> MetadataToDictionary(Metadata meta)
+        private static IDictionary<string, string> MetadataToDictionary(Metadata meta)
         {
             var dict = new Dictionary<string, string>();
             foreach (var entry in meta)
@@ -67,42 +69,55 @@ namespace grpc_test
             return dict;
         }
 
+        private static void PrintRequestHeaders(ServerCallContext context, string prefix)
+        {
+            Console.WriteLine(prefix + "- gRPC Request Headers -");
+            foreach (var entry in context.RequestHeaders)
+            {
+                Console.WriteLine(prefix + $"   [{entry.Key}] => '{entry.Value}'");
+            }
+            Console.WriteLine(prefix + "- end of gRPC Request Headers -");
+        }
+
+        private static ISpanContext ExtractSpanContextOrDefault(
+          ITracer tracer,
+          ServerCallContext context,
+          ISpanContext defaultVal = null)
+        {
+            ISpanContext spanContext = defaultVal;
+            try {
+                var dict = MetadataToDictionary(context.RequestHeaders);
+                var adapter = new TextMapExtractAdapter(dict);
+                spanContext = tracer.Extract(BuiltinFormats.HttpHeaders, adapter);
+            } catch {}
+            return spanContext;
+        }
+
         public override Task<BounceReply>
             BounceIt(BounceRequest request, ServerCallContext context)
         {
-            ISpanContext parentSpanCtx = null;
-            try
-            {
-                var dict = MetadataToDictionary(context.RequestHeaders);
-                parentSpanCtx = _tracer.Extract(BuiltinFormats.HttpHeaders,
-                                                new TextMapExtractAdapter(dict));
-                Console.WriteLine("Fixed a parent span from:");
-                foreach(var entry in dict)
-                {
-                    Console.WriteLine($"{entry.Key} => {entry.Value}");
-                }
-            }
-            catch (Exception e)
-            {
-                Console.WriteLine("Could not read parentSpanCtx", e);
-            }
+            var T = request.TabLevel;
+            Console.WriteLine(T + "BounceIt() got a request.");
+            PrintRequestHeaders(context, T);
             var builder = _tracer.BuildSpan("grpc://BounceIt");
+
+            ISpanContext parentSpanCtx = ExtractSpanContextOrDefault(_tracer, context);
             if (parentSpanCtx != null)
             {
                 builder.AsChildOf(parentSpanCtx);
             }
+
             using (var scope = builder.StartActive(true))
             {
                 var span = scope.Span;
-                Console.WriteLine("Entered into bounceit");
                 var chanceToDoIt = request.ChanceOfBounce;
                 var randomizedChance = new Random().NextDouble();
                 var returnMessage = "Hello!";
+
                 if (chanceToDoIt >= randomizedChance)
                 {
                     span.Log(DateTime.Now,
                              $"Doing another bounce: {chanceToDoIt} >= {randomizedChance}");
-                    Console.WriteLine($"Do a bounce! {randomizedChance}");
                     var targetA = request.TargetA;
                     var targetB = request.TargetB;
                     var doTargetA = request.DoTargetA;
@@ -111,23 +126,27 @@ namespace grpc_test
 
                     var channel = new Channel(target, ChannelCredentials.Insecure);
                     var client = new Bouncer.BouncerClient(channel);
-                    var dict = new Dictionary<string, string>();
-                    var meta = CreateInjectPackageFromSpan(span);
-                    var reply = client.BounceIt(new BounceRequest {
-                            TargetA = targetA,
-                            TargetB = targetB,
-                            DoTargetA = nextTargetA,
-                            ChanceOfBounce = chanceToDoIt
-                        }, meta);
-                    Console.WriteLine($"Bounce returned! {randomizedChance}");
+
+                    var bounceRequest = new BounceRequest {
+                        TargetA = targetA,
+                        TargetB = targetB,
+                        DoTargetA = nextTargetA,
+                        ChanceOfBounce = chanceToDoIt,
+                        TabLevel = request.TabLevel + "  "
+                    };
+                    var metadata = CreateInjectMetadataFromSpan(_tracer, span);
+                    Console.WriteLine(T + "Doing another bounce!");
+                    var reply = client.BounceIt(bounceRequest, metadata);
                     returnMessage += " " + reply.Msg;
                 }
-                var sleepyTime = (int) (randomizedChance * 1000);
-                Console.WriteLine($"Sleeping for {sleepyTime}");
+                var sleepyTimeMs = (int) (randomizedChance * 1000);
+
+                Console.Write(T + $"Sleeping for {sleepyTimeMs}ms...");
                 span.Log(DateTime.Now,
-                         $"Sleeping for {sleepyTime}");
-                Thread.Sleep(sleepyTime);
+                         $"Sleeping for {sleepyTimeMs}ms");
+                Thread.Sleep(sleepyTimeMs);
                 Console.WriteLine($"Woke up");
+
                 return Task.FromResult(new BounceReply
                 {
                     Msg = returnMessage
