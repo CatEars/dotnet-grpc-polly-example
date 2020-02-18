@@ -131,11 +131,17 @@ namespace grpc_test
                     var client = new Bouncer.BouncerClient(channel);
 
                     var policy = Policy
-                        .Handle<Exception>()
-                        .Retry(3, (exception, attempt) =>
+                        .Handle<RpcException>()
+                        .WaitAndRetry(new[]
+                        {
+                            TimeSpan.FromSeconds(1),
+                            TimeSpan.FromSeconds(5),
+                            TimeSpan.FromSeconds(10),
+                        }, (exception, timespan, attempt, context) =>
                         {
                             Console.WriteLine(T + $">> Failed attempt: {attempt}");
                             span.SetTag("FailedAttempts", $"{attempt}");
+                            span.Log($"Attempt #{attempt} failed. Waiting for {timespan} until trying again.");
                         });
 
                     policy.Execute(() =>
