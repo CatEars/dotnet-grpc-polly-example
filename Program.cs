@@ -20,15 +20,25 @@ namespace grpc_test
             }
         }
 
+        public static string EnvVarOrDefault(string varname, string defaultVal)
+        {
+            var env = Environment.GetEnvironmentVariable(varname);
+            if (env == null || env == "") {
+                return defaultVal;
+            }
+            return env;
+        }
+
         public static void DoTheBounce() {
             Environment.SetEnvironmentVariable("GRPC_TRACE", "api");
             Environment.SetEnvironmentVariable("GRPC_VERBOSITY", "debug");
             Grpc.Core.GrpcEnvironment.SetLogger(new Grpc.Core.Logging.ConsoleLogger());
 
-            var targetA = "localhost:5001";
-            var targetB = "localhost:5002";
+            var targetA = EnvVarOrDefault("TARGET_A", "localhost:5001");
+            var targetB = EnvVarOrDefault("TARGET_B", "localhost:5002");
+            Console.WriteLine($"A: {targetA} B: {targetB}");
             var nextTargetA = false;
-            var chanceToDoIt = 0.90;
+            var chanceToDoIt = 0.70;
             var channel = new Channel(targetA, ChannelCredentials.Insecure);
             var client = new Bouncer.BouncerClient(channel);
             var reply = client.BounceIt(new BounceRequest {

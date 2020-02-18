@@ -3,6 +3,7 @@ using Jaeger.Reporters;
 using Jaeger.Samplers;
 using Jaeger.Senders;
 using Jaeger;
+using Polly;
 using Microsoft.Extensions.Logging;
 using OpenTracing.Propagation;
 using OpenTracing;
@@ -112,6 +113,7 @@ namespace grpc_test
                 var span = scope.Span;
                 var chanceToDoIt = request.ChanceOfBounce;
                 var randomizedChance = new Random().NextDouble();
+                var exceptionRisk = new Random().NextDouble() - 0.2;
                 var returnMessage = "Hello!";
 
                 if (chanceToDoIt >= randomizedChance)
@@ -127,17 +129,34 @@ namespace grpc_test
                     var channel = new Channel(target, ChannelCredentials.Insecure);
                     var client = new Bouncer.BouncerClient(channel);
 
-                    var bounceRequest = new BounceRequest {
-                        TargetA = targetA,
-                        TargetB = targetB,
-                        DoTargetA = nextTargetA,
-                        ChanceOfBounce = chanceToDoIt,
-                        TabLevel = request.TabLevel + "  "
-                    };
-                    var metadata = CreateInjectMetadataFromSpan(_tracer, span);
-                    Console.WriteLine(T + "Doing another bounce!");
-                    var reply = client.BounceIt(bounceRequest, metadata);
-                    returnMessage += " " + reply.Msg;
+                    var policy = Policy
+                        .Handle<Exception>()
+                        .Retry(3, (exception, attempt) =>
+                        {
+                            Console.WriteLine(T + $">> Failed attempt: {attempt}");
+                            span.SetTag("FailedAttempts", $"{attempt}");
+                        });
+
+                    policy.Execute(() =>
+                    {
+                        var bounceRequest = new BounceRequest {
+                            TargetA = targetA,
+                            TargetB = targetB,
+                            DoTargetA = nextTargetA,
+                            ChanceOfBounce = chanceToDoIt,
+                            TabLevel = request.TabLevel + "  "
+                        };
+                        var metadata = CreateInjectMetadataFromSpan(_tracer, span);
+                        Console.WriteLine(T + "Doing another bounce!");
+                        var reply = client.BounceIt(bounceRequest, metadata);
+                        returnMessage += " " + reply.Msg;
+                    });
+                }
+                else if (chanceToDoIt >= exceptionRisk)
+                {
+                    Console.WriteLine($"Exception thrown: {chanceToDoIt} >= {exceptionRisk}");
+                    span.SetTag("Error", "True");
+                    throw new Exception("Woopsie daisy! Got an exception!");
                 }
                 var sleepyTimeMs = (int) (randomizedChance * 1000);
 
