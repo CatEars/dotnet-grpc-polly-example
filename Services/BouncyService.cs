@@ -115,6 +115,7 @@ namespace grpc_test
                 var randomizedChance = new Random().NextDouble();
                 var exceptionRisk = new Random().NextDouble() - 0.2;
                 var returnMessage = "Hello!";
+                var sleepyTimeMs = (int) (randomizedChance * 1000);
 
                 if (chanceToDoIt >= randomizedChance)
                 {
@@ -154,15 +155,14 @@ namespace grpc_test
                 }
                 else if (chanceToDoIt >= exceptionRisk)
                 {
+                    Thread.Sleep(sleepyTimeMs);
                     Console.WriteLine($"Exception thrown: {chanceToDoIt} >= {exceptionRisk}");
+                    span.Log($"Exception thrown: {chanceToDoIt} >= {exceptionRisk}");
                     span.SetTag("Error", "True");
                     throw new Exception("Woopsie daisy! Got an exception!");
                 }
-                var sleepyTimeMs = (int) (randomizedChance * 1000);
 
                 Console.Write(T + $"Sleeping for {sleepyTimeMs}ms...");
-                span.Log(DateTime.Now,
-                         $"Sleeping for {sleepyTimeMs}ms");
                 Thread.Sleep(sleepyTimeMs);
                 Console.WriteLine($"Woke up");
 

@@ -41,14 +41,23 @@ namespace grpc_test
             var chanceToDoIt = 0.70;
             var channel = new Channel(targetA, ChannelCredentials.Insecure);
             var client = new Bouncer.BouncerClient(channel);
-            var reply = client.BounceIt(new BounceRequest {
-                    TargetA = targetA,
-                    TargetB = targetB,
-                    DoTargetA = nextTargetA,
-                    ChanceOfBounce = chanceToDoIt,
-                    TabLevel = ""
-                });
-            Console.WriteLine($"Reply: {reply.Msg}");
+            try {
+                var reply = client.BounceIt(new BounceRequest {
+                        TargetA = targetA,
+                        TargetB = targetB,
+                        DoTargetA = nextTargetA,
+                        ChanceOfBounce = chanceToDoIt,
+                        TabLevel = ""
+                    });
+                Console.WriteLine($"Reply: {reply.Msg}");
+            } catch (RpcException e) {
+                Console.WriteLine("Woops, looks like we got an exception. " +
+                                  "Just make sure to run this a few times to get " +
+                                  "some data for Jaeger.");
+                Console.WriteLine("*** RpcException Start ***");
+                Console.WriteLine(e);
+                Console.WriteLine("*** RpcException End ***");
+            }
         }
 
         public static IHostBuilder CreateHostBuilder(string[] args) =>
